@@ -6,6 +6,7 @@
 #include "atltypes.h"
 #include <d2d1.h>
 #include <d2d1helper.h>
+#include <winnt.h>
 #include <winuser.h>
 #include <new>
 #include <gdiplus.h>
@@ -18,6 +19,11 @@
 {                                 \
     hr = (_hr_expr);              \
     if (FAILED(hr)) return hr;    \
+}
+#define HRVOID(_hr_expr)          \
+{                                 \
+    hr = (_hr_expr);              \
+    if (FAILED(hr)) return;       \
 }
 #ifndef VERIFY
 #ifdef _DEBUG
@@ -151,17 +157,31 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
 
     LayeredWindowInfo m_info;
     GdiBitmap m_bitmap;
-    Graphics m_graphics;
+    CComPtr<ID2D1Factory> factory;
+    CComPtr<ID2D1DCRenderTarget> target;
+    CComPtr<ID2D1SolidColorBrush> brush;
 
   public:
     BEGIN_MSG_MAP(LayeredWindow)
     MSG_WM_DESTROY(OnDestroy)
     END_MSG_MAP()
 
-    LayeredWindow() : m_info(600, 400), m_bitmap(m_info.GetWidth(), m_info.GetHeight()), m_graphics(m_bitmap.GetDC())
+    LayeredWindow() : m_info(600, 400), m_bitmap(m_info.GetWidth(), m_info.GetHeight())
     {
-
         VERIFY(0 != __super::Create(0)); // parent
+
+        const D2D1_PIXEL_FORMAT format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+        const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, format);
+
+        HRESULT hr;
+        HRVOID(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &factory));
+        HRVOID(factory->CreateDCRenderTarget(&properties, &target));
+
+        const RECT rect = {0, 0, static_cast<LONG>(m_bitmap.GetWidth()), static_cast<LONG>(m_bitmap.GetHeight())};
+        HRVOID(target->BindDC(m_bitmap.GetDC(), &rect));
+
+        HRVOID(target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &brush));
+
         ShowWindow(SW_SHOW);
         Render();
     }
@@ -169,21 +189,19 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
     void Render()
     {
         // Do some drawing here
-        m_graphics.Clear(Color(0, 0, 0, 0));
+        target->BeginDraw();
 
-        // Draw semi-transparent rectangle
-        SolidBrush semiTransparentBrush(Color(160, 0, 0, 0)); // ARGB
-        m_graphics.FillRectangle(&semiTransparentBrush, 0, 0, m_info.GetWidth(), m_info.GetHeight());
+        target->Clear(D2D1::ColorF(0, 0, 0, 0));
 
-        // Draw non-transparent circle
-        SolidBrush circleBrush(Color(255, 50, 100, 255));
-        m_graphics.FillEllipse(&circleBrush, 200, 100, 200, 200);
+        brush->SetColor(D2D1::ColorF(0, 0, 0, 0.627f));
+        target->FillRectangle(D2D1::RectF(0, 0, (FLOAT)m_info.GetWidth(), (FLOAT)m_info.GetHeight()), brush);
 
-        // Draw text
-        FontFamily fontFamily(L"Segoe UI");
-        Font font(&fontFamily, 24, FontStyleRegular, UnitPixel);
-        SolidBrush textBrush(Color(255, 255, 255, 255));
-        m_graphics.DrawString(L"Hello, Layered Window!", -1, &font, PointF(150.0f, 320.0f), &textBrush);
+        brush->SetColor(D2D1::ColorF(D2D1::ColorF::Green));
+        brush->SetOpacity(1.0);
+        target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(300.0f, 200.0f), 100.0f, 100.0f), brush);
+
+        HRESULT hr;
+        HRVOID(target->EndDraw());
 
         m_info.Update(m_hWnd, m_bitmap.GetDC());
     }
@@ -196,12 +214,6 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
-    // Initialize GDI+
-    GdiplusStartupInput gdiplusStartupInput;
-    ULONG_PTR gdiplusToken;
-    if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr) != Ok)
-        return -1;
-
     {
         LayeredWindow window;
 
@@ -213,7 +225,5 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
         }
     }
 
-    // Clear GDI+
-    GdiplusShutdown(gdiplusToken);
     return 0;
 }
