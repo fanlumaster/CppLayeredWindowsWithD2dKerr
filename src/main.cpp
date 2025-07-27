@@ -7,8 +7,11 @@
 #include <d2d1.h>
 #include <d2d1helper.h>
 #include <winuser.h>
+#include <new>
+#include <gdiplus.h>
 
 #pragma comment(lib, "d2d1.lib")
+#pragma comment(lib, "gdiplus.lib")
 
 // clang-format off
 #define HR(_hr_expr)              \
@@ -26,147 +29,191 @@
 #endif
 // clang-format on
 
-class Window : public CWindowImpl<Window, CWindow, CWinTraits<WS_OVERLAPPEDWINDOW>>
+using namespace std;
+using namespace Gdiplus;
+
+class LayeredWindowInfo
 {
+    const POINT m_sourcePosition;
+    POINT m_windowPosition;
+    CSize m_size;
+    BLENDFUNCTION m_blend;
+    UPDATELAYEREDWINDOWINFO m_info;
+
   public:
-    BEGIN_MSG_MAP(Window)
+    LayeredWindowInfo(__in UINT width, __in UINT height) : m_sourcePosition(), m_windowPosition(), m_size(width, height), m_blend(), m_info()
+    {
+
+        m_info.cbSize = sizeof(UPDATELAYEREDWINDOWINFO);
+        m_info.pptSrc = &m_sourcePosition;
+        m_info.pptDst = &m_windowPosition;
+        m_info.psize = &m_size;
+        m_info.pblend = &m_blend;
+        m_info.dwFlags = ULW_ALPHA;
+
+        m_blend.SourceConstantAlpha = 255;
+        m_blend.AlphaFormat = AC_SRC_ALPHA;
+    }
+
+    void Update(__in HWND window, __in HDC source)
+    {
+
+        m_info.hdcSrc = source;
+
+        VERIFY(UpdateLayeredWindowIndirect(window, &m_info));
+    }
+
+    UINT GetWidth() const
+    {
+        return m_size.cx;
+    }
+
+    UINT GetHeight() const
+    {
+        return m_size.cy;
+    }
+};
+
+class GdiBitmap
+{
+    const UINT m_width;
+    const UINT m_height;
+    const UINT m_stride;
+    void *m_bits;
+    HBITMAP m_oldBitmap;
+
+    CDC m_dc;
+    CBitmap m_bitmap;
+
+  public:
+    GdiBitmap(__in UINT width, __in UINT height) : m_width(width), m_height(height), m_stride((width * 32 + 31) / 32 * 4), m_bits(0), m_oldBitmap(0)
+    {
+
+        BITMAPINFO bitmapInfo = {};
+        bitmapInfo.bmiHeader.biSize = sizeof(bitmapInfo.bmiHeader);
+        bitmapInfo.bmiHeader.biWidth = width;
+        bitmapInfo.bmiHeader.biHeight = 0 - height;
+        bitmapInfo.bmiHeader.biPlanes = 1;
+        bitmapInfo.bmiHeader.biBitCount = 32;
+        bitmapInfo.bmiHeader.biCompression = BI_RGB;
+
+        m_bitmap.Attach(CreateDIBSection( //
+            0,                            // device context
+            &bitmapInfo, DIB_RGB_COLORS, &m_bits,
+            0,   // file mapping object
+            0)); // file offset
+        if (0 == m_bits)
+        {
+            throw bad_alloc();
+        }
+
+        if (0 == m_dc.CreateCompatibleDC())
+        {
+            throw bad_alloc();
+        }
+
+        m_oldBitmap = m_dc.SelectBitmap(m_bitmap);
+    }
+
+    ~GdiBitmap()
+    {
+        m_dc.SelectBitmap(m_oldBitmap);
+    }
+
+    UINT GetWidth() const
+    {
+        return m_width;
+    }
+
+    UINT GetHeight() const
+    {
+        return m_height;
+    }
+
+    UINT GetStride() const
+    {
+        return m_stride;
+    }
+
+    void *GetBits() const
+    {
+        return m_bits;
+    }
+
+    HDC GetDC() const
+    {
+        return m_dc;
+    }
+};
+
+class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_POPUP, WS_EX_LAYERED>>
+{
+
+    LayeredWindowInfo m_info;
+    GdiBitmap m_bitmap;
+    Graphics m_graphics;
+
+  public:
+    BEGIN_MSG_MAP(LayeredWindow)
     MSG_WM_DESTROY(OnDestroy)
-    MSG_WM_PAINT(OnPaint)
-    MSG_WM_DISPLAYCHANGE(OnDisplayChange)
-    MSG_WM_SIZE(OnSize)
     END_MSG_MAP()
 
-    HRESULT Create()
+    LayeredWindow() : m_info(600, 400), m_bitmap(m_info.GetWidth(), m_info.GetHeight()), m_graphics(m_bitmap.GetDC())
     {
-        VERIFY(__super::Create(nullptr)); // Top-level window
 
-        VERIFY(SetWindowText(L"Alpha Window"));
-
-        VERIFY(SetWindowPos( //
-            nullptr,         // No Z-order change
-            100, 100,        // Position (x, y)
-            600, 400,        // Size (width, height)
-            SWP_NOZORDER | SWP_SHOWWINDOW));
-
-        CreateDeviceIndependentResources();
-        SetWindowLongPtr( //
-            GWL_EXSTYLE,  //
-            GetWindowLongPtr(GWL_EXSTYLE) | WS_EX_LAYERED);
-        VERIFY(SetLayeredWindowAttributes( //
-            m_hWnd,                        //
-            0,                             // no color key
-            180,                           // alpha value
-            LWA_ALPHA));
-
-        VERIFY(UpdateWindow());
-
-        return S_OK;
-    }
-
-    HRESULT CreateDeviceIndependentResources()
-    {
-        HRESULT hr;
-        // Create device-independent resources here
-        HR(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &m_factory));
-        return S_OK;
-    }
-
-    HRESULT CreateDeviceResources()
-    {
-        HRESULT hr;
-        if (0 == m_target)
-        {
-            CRect rect;
-            VERIFY(GetClientRect(&rect));
-            D2D1_SIZE_U size = D2D1::SizeU(rect.Width(), rect.Height());
-            HR(m_factory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), D2D1::HwndRenderTargetProperties(m_hWnd, size), &m_target));
-            HR(m_target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &m_brush));
-        }
-        return S_OK;
-    }
-
-    void DiscardDeviceResources()
-    {
-        m_brush.Release();
-        m_target.Release();
+        VERIFY(0 != __super::Create(0)); // parent
+        ShowWindow(SW_SHOW);
+        Render();
     }
 
     void Render()
     {
-        if (SUCCEEDED(CreateDeviceResources()))
-        {
-            if (0 == (D2D1_WINDOW_STATE_OCCLUDED & m_target->CheckWindowState()))
-            {
-                m_target->BeginDraw();
-                m_target->SetTransform(D2D1::Matrix3x2F::Identity());
-                m_target->Clear(D2D1::ColorF(D2D1::ColorF::White));
+        // Do some drawing here
+        m_graphics.Clear(Color(0, 0, 0, 0));
 
-                // Drawing code here
+        // Draw semi-transparent rectangle
+        SolidBrush semiTransparentBrush(Color(160, 0, 0, 0)); // ARGB
+        m_graphics.FillRectangle(&semiTransparentBrush, 0, 0, m_info.GetWidth(), m_info.GetHeight());
 
-                if (D2DERR_RECREATE_TARGET == m_target->EndDraw())
-                {
-                    DiscardDeviceResources();
-                }
-            }
-        }
-    }
-    void OnPaint(CDCHandle /*dc*/)
-    {
-        PAINTSTRUCT paint;
-        VERIFY(BeginPaint(&paint));
-        Render();
-        EndPaint(&paint);
+        // Draw non-transparent circle
+        SolidBrush circleBrush(Color(255, 50, 100, 255));
+        m_graphics.FillEllipse(&circleBrush, 200, 100, 200, 200);
+
+        // Draw text
+        FontFamily fontFamily(L"Segoe UI");
+        Font font(&fontFamily, 24, FontStyleRegular, UnitPixel);
+        SolidBrush textBrush(Color(255, 255, 255, 255));
+        m_graphics.DrawString(L"Hello, Layered Window!", -1, &font, PointF(150.0f, 320.0f), &textBrush);
+
+        m_info.Update(m_hWnd, m_bitmap.GetDC());
     }
 
-    void OnDisplayChange(UINT /*bpp*/, CSize /*resolution*/)
-    {
-        Render();
-    }
-
-    void OnSize(UINT /*type*/, CSize size)
-    {
-        if (0 != m_target)
-        {
-            if (FAILED(m_target->Resize(D2D1::SizeU(size.cx, size.cy))))
-            {
-                DiscardDeviceResources();
-                VERIFY(Invalidate(FALSE));
-            }
-        }
-    }
-
-  private:
     void OnDestroy()
     {
-        ::PostQuitMessage(1);
+        PostQuitMessage(1);
     }
-
-    CComPtr<ID2D1Factory> m_factory;
-    CComPtr<ID2D1HwndRenderTarget> m_target;
-    CComPtr<ID2D1SolidColorBrush> m_brush;
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // Initialize GDI+
+    GdiplusStartupInput gdiplusStartupInput;
+    ULONG_PTR gdiplusToken;
+    if (GdiplusStartup(&gdiplusToken, &gdiplusStartupInput, nullptr) != Ok)
+        return -1;
 
-    HRESULT hr = S_OK;
-    ::CoInitialize(nullptr);
-
-    Window wnd;
-
-    HR(wnd.Create());
-
-    wnd.ShowWindow(nCmdShow);
-    wnd.UpdateWindow();
-
-    MSG msg = {};
-    while (GetMessage(&msg, nullptr, 0, 0))
     {
-        TranslateMessage(&msg);
-        DispatchMessage(&msg);
+        LayeredWindow window;
+
+        MSG msg = {};
+        while (GetMessage(&msg, nullptr, 0, 0))
+        {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
     }
 
-    ::CoUninitialize();
-    return static_cast<int>(msg.wParam);
+    // Clear GDI+
+    GdiplusShutdown(gdiplusToken);
+    return 0;
 }
