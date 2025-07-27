@@ -22,7 +22,7 @@ How to run:
 
 ## Resources
 
-- <https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/september/drawing-with-direct2d>
+- <https://learn.microsoft.com/en-us/archive/msdn-magazine/2009/december/windows-with-c-layered-windows-with-direct2d>
 
 WTL template code source:
 
