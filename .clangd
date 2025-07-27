@@ -3,7 +3,7 @@ CompileFlags:
       -DUNICODE,
       -D_UNICODE,
       "-std=c++17", # needed when using MSVC
-      "-IC:/Users/SonnyCalcr/EDisk/CppCodes/CMakeWindowsSamples/CppLayeredWindowsWithD2d/wtl",
+      "-IC:/Users/SonnyCalcr/EDisk/CppCodes/CMakeWindowsSamples/CppLayeredWindowsWithD2dKerr/wtl",
       -Wno-microsoft-goto,
       -Wno-nonportable-include-path,
       -Wno-microsoft-extra-qualification,

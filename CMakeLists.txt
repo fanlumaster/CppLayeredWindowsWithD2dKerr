@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25.0)
-project(CppLayeredWindowsWithD2d VERSION 1.0)
+project(CppLayeredWindowsWithD2dKerr VERSION 1.0)
 
 # Specify the C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -14,7 +14,7 @@ add_definitions(
 
 include_directories("./wtl")
 
-set(MY_EXECUTABLE_NAME "CppLayeredWindowsWithD2d")
+set(MY_EXECUTABLE_NAME "CppLayeredWindowsWithD2dKerr")
 set(
   SOURCE_FILES
   "./src/main.cpp"

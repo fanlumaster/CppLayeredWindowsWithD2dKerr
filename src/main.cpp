@@ -40,7 +40,7 @@ class Window : public CWindowImpl<Window, CWindow, CWinTraits<WS_OVERLAPPEDWINDO
     {
         VERIFY(__super::Create(nullptr)); // Top-level window
 
-        VERIFY(SetWindowText(L"Drawing with Direct2D"));
+        VERIFY(SetWindowText(L"Alpha Window"));
 
         VERIFY(SetWindowPos( //
             nullptr,         // No Z-order change
@@ -49,6 +49,14 @@ class Window : public CWindowImpl<Window, CWindow, CWinTraits<WS_OVERLAPPEDWINDO
             SWP_NOZORDER | SWP_SHOWWINDOW));
 
         CreateDeviceIndependentResources();
+        SetWindowLongPtr( //
+            GWL_EXSTYLE,  //
+            GetWindowLongPtr(GWL_EXSTYLE) | WS_EX_LAYERED);
+        VERIFY(SetLayeredWindowAttributes( //
+            m_hWnd,                        //
+            0,                             // no color key
+            180,                           // alpha value
+            LWA_ALPHA));
 
         VERIFY(UpdateWindow());
 
@@ -91,13 +99,9 @@ class Window : public CWindowImpl<Window, CWindow, CWinTraits<WS_OVERLAPPEDWINDO
             {
                 m_target->BeginDraw();
                 m_target->SetTransform(D2D1::Matrix3x2F::Identity());
-                m_target->Clear(D2D1::ColorF(D2D1::ColorF::Red));
+                m_target->Clear(D2D1::ColorF(D2D1::ColorF::White));
 
                 // Drawing code here
-                m_brush->SetColor(D2D1::ColorF(D2D1::ColorF::Green));
-                const D2D1_SIZE_F size = m_target->GetSize();
-                const D2D1_RECT_F rect = D2D1::RectF(0, 0, size.width, size.height);
-                m_target->FillRectangle(rect, m_brush);
 
                 if (D2DERR_RECREATE_TARGET == m_target->EndDraw())
                 {
