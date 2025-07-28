@@ -10,6 +10,7 @@
 #include <winuser.h>
 #include <new>
 #include <gdiplus.h>
+#include <wincodec.h>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "gdiplus.lib")
@@ -152,33 +153,71 @@ class GdiBitmap
     }
 };
 
+class RenderTargetDC
+{
+    ID2D1GdiInteropRenderTarget *m_renderTarget;
+    HDC m_dc;
+
+  public:
+    RenderTargetDC(ID2D1GdiInteropRenderTarget *renderTarget) : m_renderTarget(renderTarget), m_dc(0)
+    {
+        HRESULT hr;
+        HRVOID(m_renderTarget->GetDC(D2D1_DC_INITIALIZE_MODE_COPY, &m_dc));
+    }
+
+    ~RenderTargetDC()
+    {
+        RECT rect = {};
+        m_renderTarget->ReleaseDC(&rect);
+    }
+
+    operator HDC() const
+    {
+        return m_dc;
+    }
+};
+
 class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_POPUP, WS_EX_LAYERED>>
 {
 
     LayeredWindowInfo m_info;
-    GdiBitmap m_bitmap;
-    CComPtr<ID2D1Factory> factory;
-    CComPtr<ID2D1DCRenderTarget> target;
+    CComPtr<ID2D1Factory> d2d_factory;
+    CComPtr<ID2D1RenderTarget> target;
     CComPtr<ID2D1SolidColorBrush> brush;
+    CComPtr<IWICImagingFactory> wic_factory;
+    CComPtr<IWICBitmap> wic_bitmap;
+    CComPtr<ID2D1GdiInteropRenderTarget> interopTarget;
 
   public:
     BEGIN_MSG_MAP(LayeredWindow)
     MSG_WM_DESTROY(OnDestroy)
     END_MSG_MAP()
 
-    LayeredWindow() : m_info(600, 400), m_bitmap(m_info.GetWidth(), m_info.GetHeight())
+    LayeredWindow() : m_info(600, 400)
     {
         VERIFY(0 != __super::Create(0)); // parent
 
         const D2D1_PIXEL_FORMAT format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
-        const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT, format);
+        const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties( //
+            D2D1_RENDER_TARGET_TYPE_DEFAULT, format,
+            0.0f, // default dpi
+            0.0f, // default dpi
+            D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE);
 
         HRESULT hr;
-        HRVOID(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &factory));
-        HRVOID(factory->CreateDCRenderTarget(&properties, &target));
+        HRVOID(wic_factory.CoCreateInstance(CLSID_WICImagingFactory));
+        HRVOID(wic_factory->CreateBitmap(  //
+            m_info.GetWidth(),             //
+            m_info.GetHeight(),            //
+            GUID_WICPixelFormat32bppPBGRA, //
+            WICBitmapCacheOnLoad,          //
+            &wic_bitmap)                   //
+        );
 
-        const RECT rect = {0, 0, static_cast<LONG>(m_bitmap.GetWidth()), static_cast<LONG>(m_bitmap.GetHeight())};
-        HRVOID(target->BindDC(m_bitmap.GetDC(), &rect));
+        HRVOID(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d_factory));
+        HRVOID(d2d_factory->CreateWicBitmapRenderTarget(wic_bitmap, properties, &target));
+
+        HRVOID(target.QueryInterface(&interopTarget));
 
         HRVOID(target->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &brush));
 
@@ -188,32 +227,38 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
 
     void Render()
     {
-        // Do some drawing here
         target->BeginDraw();
-
+        // Do some drawing here
         target->Clear(D2D1::ColorF(0, 0, 0, 0));
 
         brush->SetColor(D2D1::ColorF(0, 0, 0, 0.627f));
         target->FillRectangle(D2D1::RectF(0, 0, (FLOAT)m_info.GetWidth(), (FLOAT)m_info.GetHeight()), brush);
 
-        brush->SetColor(D2D1::ColorF(D2D1::ColorF::Green));
+        brush->SetColor(D2D1::ColorF(D2D1::ColorF::Yellow));
         brush->SetOpacity(1.0);
         target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(300.0f, 200.0f), 100.0f, 100.0f), brush);
 
+        {
+            RenderTargetDC dc(interopTarget);
+            m_info.Update(m_hWnd, dc);
+        }
+
         HRESULT hr;
         HRVOID(target->EndDraw());
-
-        m_info.Update(m_hWnd, m_bitmap.GetDC());
     }
 
     void OnDestroy()
     {
+        // TODO: Discard/Clear Device Resources
         PostQuitMessage(1);
     }
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
     {
         LayeredWindow window;
 
@@ -225,5 +270,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
         }
     }
 
+    CoUninitialize();
     return 0;
 }
