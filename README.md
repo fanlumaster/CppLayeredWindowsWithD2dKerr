@@ -6,19 +6,19 @@
 
 ![](https://i.postimg.cc/yYrtMP6s/image.png)
 
-### second
+### second The GDI/GDI+ Way
 
 ![](https://i.postimg.cc/YSYMbVHv/image.png)
 
-## third
+## third Direct2D to GDI/DC
 
 ![](https://i.postimg.cc/SQHs7HHp/image.png)
 
-## fourth
+## fourth Direct2D to WIC
 
 ![](https://i.postimg.cc/RhrdFL9j/image.png)
 
-## fifth
+## fifth Direct2D to Direct3D/DXGI
 
 ![](https://i.postimg.cc/dVvqCb40/image.png)
 
