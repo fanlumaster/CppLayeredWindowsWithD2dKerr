@@ -11,9 +11,11 @@
 #include <new>
 #include <gdiplus.h>
 #include <wincodec.h>
+#include <d3d10_1.h>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "gdiplus.lib")
+#pragma comment(lib, "d3d10_1.lib")
 
 // clang-format off
 #define HR(_hr_expr)              \
@@ -184,9 +186,10 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
     CComPtr<ID2D1Factory> d2d_factory;
     CComPtr<ID2D1RenderTarget> target;
     CComPtr<ID2D1SolidColorBrush> brush;
-    CComPtr<IWICImagingFactory> wic_factory;
-    CComPtr<IWICBitmap> wic_bitmap;
     CComPtr<ID2D1GdiInteropRenderTarget> interopTarget;
+    CComPtr<ID3D10Device1> device;
+    CComPtr<ID3D10Texture2D> texture;
+    CComPtr<IDXGISurface> surface;
 
   public:
     BEGIN_MSG_MAP(LayeredWindow)
@@ -195,7 +198,31 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
 
     LayeredWindow() : m_info(600, 400)
     {
+        HRESULT hr;
         VERIFY(0 != __super::Create(0)); // parent
+
+        HRVOID(                 //
+            D3D10CreateDevice1( //
+                0,              // adapter
+                D3D10_DRIVER_TYPE_HARDWARE,
+                0, // reserved
+                D3D10_CREATE_DEVICE_BGRA_SUPPORT, D3D10_FEATURE_LEVEL_10_0, D3D10_1_SDK_VERSION, &device));
+
+        D3D10_TEXTURE2D_DESC description = {};
+        description.ArraySize = 1;
+        description.BindFlags = D3D10_BIND_RENDER_TARGET;
+        description.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        description.Width = m_info.GetWidth();
+        description.Height = m_info.GetHeight();
+        description.MipLevels = 1;
+        description.SampleDesc.Count = 1;
+        description.MiscFlags = D3D10_RESOURCE_MISC_GDI_COMPATIBLE;
+        HRVOID(device->CreateTexture2D( //
+            &description,
+            0, // no initial data
+            &texture));
+
+        HRVOID(texture.QueryInterface(&surface));
 
         const D2D1_PIXEL_FORMAT format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
         const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties( //
@@ -204,18 +231,8 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
             0.0f, // default dpi
             D2D1_RENDER_TARGET_USAGE_GDI_COMPATIBLE);
 
-        HRESULT hr;
-        HRVOID(wic_factory.CoCreateInstance(CLSID_WICImagingFactory));
-        HRVOID(wic_factory->CreateBitmap(  //
-            m_info.GetWidth(),             //
-            m_info.GetHeight(),            //
-            GUID_WICPixelFormat32bppPBGRA, //
-            WICBitmapCacheOnLoad,          //
-            &wic_bitmap)                   //
-        );
-
         HRVOID(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d_factory));
-        HRVOID(d2d_factory->CreateWicBitmapRenderTarget(wic_bitmap, properties, &target));
+        HRVOID(d2d_factory->CreateDxgiSurfaceRenderTarget(surface, &properties, &target));
 
         HRVOID(target.QueryInterface(&interopTarget));
 
@@ -234,7 +251,7 @@ class LayeredWindow : public CWindowImpl<LayeredWindow, CWindow, CWinTraits<WS_P
         brush->SetColor(D2D1::ColorF(0, 0, 0, 0.627f));
         target->FillRectangle(D2D1::RectF(0, 0, (FLOAT)m_info.GetWidth(), (FLOAT)m_info.GetHeight()), brush);
 
-        brush->SetColor(D2D1::ColorF(D2D1::ColorF::Yellow));
+        brush->SetColor(D2D1::ColorF(D2D1::ColorF::OrangeRed));
         brush->SetOpacity(1.0);
         target->FillEllipse(D2D1::Ellipse(D2D1::Point2F(300.0f, 200.0f), 100.0f, 100.0f), brush);
 
